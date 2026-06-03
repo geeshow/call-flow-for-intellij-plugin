@@ -1,0 +1,33 @@
+<idea-plugin>
+    <id>com.methodflow.callflow</id>
+    <name>Method Call Flow</name>
+    <vendor email="" url="">kyutaepark</vendor>
+
+    <description><![CDATA[
+        선택한 메소드를 기준으로 <b>호출(callee)</b> 과 <b>피호출(caller)</b> 관계를
+        양방향 컬럼 + 곡선 그래프로 시각화합니다. Kotlin / Java 지원.
+    ]]></description>
+
+    <!-- 플랫폼 + Kotlin + Java PSI 의존 -->
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.lang</depends>
+    <depends>org.jetbrains.kotlin</depends>
+    <depends>com.intellij.java</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="Call Flow"
+                    anchor="bottom"
+                    canCloseContents="false"
+                    factoryClass="com.methodflow.CallFlowToolWindowFactory"/>
+    </extensions>
+
+    <actions>
+        <action id="com.methodflow.ShowCallFlow"
+                class="com.methodflow.ShowCallFlowAction"
+                text="Show Call Flow"
+                description="현재 커서 위치의 메소드를 기준으로 호출/피호출 관계도를 표시">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="control alt F"/>
+        </action>
+    </actions>
+</idea-plugin>

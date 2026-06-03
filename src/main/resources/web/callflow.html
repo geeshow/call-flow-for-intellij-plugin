@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Method Call Flow</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #171a22;
+    --panel-2: #1d212b;
+    --border: #2a2f3a;
+    --text: #e6e9ef;
+    --muted: #8b93a3;
+    --accent: #4f8cff;
+    --accent-soft: rgba(79, 140, 255, 0.15);
+    --accent-line: #4f8cff;
+    --green: #4ade80;
+    --amber: #fbbf24;
+    --purple: #a78bfa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, monospace;
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+  }
+  header {
+    padding: 20px 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  header h1 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: 0.3px;
+  }
+  header .sub {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  /* ---- breadcrumb path ---- */
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 28px;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+    background: var(--panel);
+  }
+  .crumb {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 12px;
+    border-radius: 6px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 12px;
+    border: 1px solid rgba(79,140,255,0.3);
+  }
+  .crumb .cls { color: var(--muted); }
+  .crumb.base {
+    background: rgba(167,139,250,0.18);
+    color: var(--purple);
+    border-color: rgba(167,139,250,0.45);
+    font-weight: 600;
+  }
+  .crumb-sep { color: var(--muted); }
+
+  /* ---- columns ---- */
+  .board {
+    display: flex;
+    gap: 0;
+    padding: 28px;
+    overflow-x: auto;
+    align-items: flex-start;
+    position: relative;
+  }
+  /* SVG 연결선 레이어 (노드 뒤에 깔림) */
+  #connectors {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    z-index: 0;
+    overflow: visible;
+  }
+  .column {
+    min-width: 280px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    position: relative;
+    padding: 0 44px;
+    z-index: 1;
+  }
+  .column:first-child { padding-left: 0; }
+  .col-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    margin-bottom: 4px;
+    padding-left: 2px;
+  }
+
+  .edge {
+    fill: none;
+    stroke: var(--border);
+    stroke-width: 1.5;
+    transition: stroke 0.16s, stroke-width 0.16s;
+  }
+  .edge.active {
+    stroke: var(--accent-line);
+    stroke-width: 2;
+  }
+
+  /* ---- method node ---- */
+  .node {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: border-color 0.16s, transform 0.16s, box-shadow 0.16s;
+    position: relative;
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    overflow: hidden;
+    background: var(--panel);
+  }
+  .node:hover {
+    border-color: var(--accent);
+    transform: translateY(-1px);
+  }
+  .node.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 6px 20px -8px rgba(79,140,255,0.5);
+  }
+  /* 왼쪽 메인 영역 (3/4): 선언 이동 + 펼치기 */
+  .node-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: var(--panel);
+    transition: background 0.16s;
+  }
+  .node:hover .node-main { background: var(--panel-2); }
+  .node.selected .node-main {
+    background: linear-gradient(180deg, var(--accent-soft), var(--panel-2));
+  }
+  .node.root .node-main {
+    background: linear-gradient(180deg, rgba(167,139,250,0.12), var(--panel-2));
+  }
+  .node.root { border-color: var(--purple); }
+  /* 오른쪽 버튼 영역 (1/4): 실제 호출 코드 줄로 이동 */
+  .node-jump {
+    flex: 0 0 24%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-left: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 16px;
+    background: rgba(255,255,255,0.015);
+    transition: background 0.16s, color 0.16s;
+  }
+  .node-jump:hover {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  /* callee(오른쪽) 노드: 버튼을 카드 왼쪽에 → 구분선도 오른쪽으로 */
+  .node-jump.left {
+    border-left: none;
+    border-right: 1px solid var(--border);
+  }
+  .node-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .badge {
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 5px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    flex-shrink: 0;
+  }
+  .badge.svc { background: rgba(74,222,128,0.15); color: var(--green); }
+  .badge.repo { background: rgba(251,191,36,0.15); color: var(--amber); }
+  .badge.util { background: rgba(167,139,250,0.15); color: var(--purple); }
+  .badge.api { background: rgba(79,140,255,0.15); color: var(--accent); }
+
+  .method-name {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--text);
+  }
+  .method-name .paren { color: var(--muted); font-weight: 400; }
+  .class-name {
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .node-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 2px;
+  }
+  .call-count {
+    font-size: 10px;
+    color: var(--muted);
+    margin-left: auto;
+  }
+  .chevron {
+    color: var(--muted);
+    font-size: 14px;
+    transition: color 0.16s;
+  }
+  .node.selected .chevron { color: var(--accent); }
+  .node.leaf .chevron { visibility: hidden; }
+
+  .empty-hint {
+    color: var(--muted);
+    font-size: 12px;
+    padding: 16px 4px;
+    font-style: italic;
+  }
+
+  .legend {
+    display: flex;
+    gap: 18px;
+    padding: 14px 28px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 11px;
+    flex-wrap: wrap;
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 9px; height: 9px; border-radius: 3px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1 id="title">🔀 Call Flow</h1>
+    <span class="sub">노드 클릭 = 메소드 선언으로 · 노드 오른쪽 <b>↳</b> 버튼 = 실제 호출 코드 줄로 이동</span>
+  </header>
+
+  <div class="breadcrumb" id="breadcrumb"></div>
+
+  <div class="board" id="board"></div>
+
+  <div class="legend">
+    <span><span class="dot" style="background:#a78bfa"></span> 기준 메소드</span>
+    <span><span class="dot" style="background:#4ade80"></span> Service</span>
+    <span><span class="dot" style="background:#fbbf24"></span> Repository</span>
+    <span><span class="dot" style="background:#a78bfa"></span> Util</span>
+    <span><span class="dot" style="background:#4f8cff"></span> API / Client</span>
+  </div>
+
+<script>
+// ----- 실제 분석 데이터: MemberBankService.getTransactions (Kotlin) -----
+let graph = /*__GRAPH__*/{};
+
+let BASE = /*__BASE__*/"";   // 플러그인이 주입
+const typeLabel = { svc: "SVC", repo: "REPO", util: "UTIL", api: "API" };
+
+function methodOf(key) { return key.split(".").pop(); }
+
+// 역방향 인덱스: 어떤 메소드를 호출하는 메소드들(callers)
+const callersIndex = {};
+for (const k in graph) {
+  (graph[k].calls || []).forEach(c => { (callersIndex[c] = callersIndex[c] || []).push(k); });
+}
+function callersOf(k) { return callersIndex[k] || []; }
+function calleesOf(k) { return (graph[k] && graph[k].calls) || []; }
+
+// 선택 경로 (둘 다 BASE에서 시작)
+let calleePath = [BASE];   // 오른쪽: 이 메소드가 호출하는 흐름
+let callerPath = [BASE];   // 왼쪽:  이 메소드를 호출하는 흐름
+
+let displayColumns = [];   // 화면에 그려지는 컬럼 디스크립터 (좌→우)
+let baseColIndex = 0;
+const nodeEls = {};        // "ci:key" -> DOM element
+
+function buildColumns() {
+  // 오른쪽(callee): col 0 = BASE, 이후 선택된 부모의 callees
+  const calleeCols = [];
+  for (let c = 0; c <= calleePath.length; c++) {
+    const items = c === 0 ? [BASE] : calleesOf(calleePath[c - 1]);
+    if (items.length === 0) break;
+    calleeCols.push({
+      items, selected: calleePath[c] || null,
+      side: c === 0 ? "base" : "callee",
+      ref: c === 0 ? null : calleePath[c - 1],
+    });
+  }
+  // 왼쪽(caller): 선택된 자식의 callers. 깊을수록 더 왼쪽 → 마지막에 reverse
+  const callerCols = [];
+  for (let d = 1; d <= callerPath.length; d++) {
+    const items = callersOf(callerPath[d - 1]);
+    if (items.length === 0) break;
+    callerCols.push({
+      items, selected: callerPath[d] || null,
+      side: "caller", ref: callerPath[d - 1],
+    });
+  }
+  callerCols.reverse();
+  baseColIndex = callerCols.length;
+  displayColumns = [...callerCols, ...calleeCols];
+}
+
+function render() {
+  const board = document.getElementById("board");
+  board.innerHTML = "";
+  for (const k in nodeEls) delete nodeEls[k];
+
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.id = "connectors";
+  board.appendChild(svg);
+
+  buildColumns();
+
+  displayColumns.forEach((colDesc, ci) => {
+    const column = document.createElement("div");
+    column.className = "column";
+
+    const title = document.createElement("div");
+    title.className = "col-title";
+    if (colDesc.side === "base")        title.textContent = "● 기준 메소드";
+    else if (colDesc.side === "caller") title.innerHTML = "↤ " + methodOf(colDesc.ref) + " 를 호출";
+    else                                title.textContent = methodOf(colDesc.ref) + " 가 호출 →";
+    column.appendChild(title);
+
+    colDesc.items.forEach(key => {
+      const data = graph[key];
+      const isSelected = colDesc.selected === key;
+      const isBase = colDesc.side === "base";
+      // 이 방향에서 더 펼칠 수 있는지
+      const outCount = colDesc.side === "caller" ? callersOf(key).length : calleesOf(key).length;
+      const isLeaf = outCount === 0;
+
+      const node = document.createElement("div");
+      node.className = "node" + (isSelected ? " selected" : "") +
+                       (isBase ? " root" : "") + (isLeaf ? " leaf" : "");
+
+      const countLabel = colDesc.side === "caller"
+        ? (isLeaf ? "entry" : outCount + " ↤")
+        : (isLeaf ? "leaf"  : "→ " + outCount);
+      const chev = colDesc.side === "caller" ? "‹" : "›";
+
+      // 이 노드의 호출선(edge): caller=>callee. 호출 위치(call-site) 이동에 사용.
+      // callee 컬럼: ref(부모) 가 key 를 호출 / caller 컬럼: key 가 ref 를 호출
+      let callEdge = null;
+      if (colDesc.side === "callee" && colDesc.ref) callEdge = [colDesc.ref, key];
+      else if (colDesc.side === "caller" && colDesc.ref) callEdge = [key, colDesc.ref];
+
+      // 버튼 위치: callee(오른쪽) 노드는 왼쪽, caller(왼쪽) 노드는 오른쪽 → 호출선 쪽(중앙)으로 모임
+      const jumpLeft = colDesc.side === "callee";
+      const mainHtml = `
+        <div class="node-main">
+          <div class="node-head">
+            <span class="badge ${data.type}">${typeLabel[data.type]}</span>
+            <span class="method-name">${methodOf(key)}<span class="paren">()</span></span>
+          </div>
+          <div class="node-meta">
+            <span class="class-name">${data.cls}</span>
+            <span class="call-count">${countLabel}</span>
+            <span class="chevron">${chev}</span>
+          </div>
+        </div>`;
+      const jumpHtml = callEdge
+        ? `<div class="node-jump${jumpLeft ? " left" : ""}" title="실제 호출 코드 줄로 이동">↳</div>`
+        : ``;
+      node.innerHTML = jumpLeft ? (jumpHtml + mainHtml) : (mainHtml + jumpHtml);
+
+      // 왼쪽 메인: 선언으로 이동 + 펼치기
+      node.querySelector(".node-main").addEventListener("click", () => {
+        if (window.__navigate) { try { window.__navigate(key); } catch (e) {} }
+        if (colDesc.side === "base") {
+          calleePath = [BASE]; callerPath = [BASE];
+        } else if (colDesc.side === "callee") {
+          const level = ci - baseColIndex;            // base=0
+          calleePath = calleePath.slice(0, level);
+          calleePath.push(key);
+        } else { // caller
+          const level = baseColIndex - ci;            // base=0
+          callerPath = callerPath.slice(0, level);
+          callerPath.push(key);
+        }
+        render();
+      });
+
+      // 오른쪽 버튼: 실제 호출 위치(call-site)로 이동 (펼치기 없음)
+      const jump = node.querySelector(".node-jump");
+      if (jump && callEdge) {
+        jump.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (window.__navigateCall) { try { window.__navigateCall(callEdge[0], callEdge[1]); } catch (e2) {} }
+        });
+      }
+
+      column.appendChild(node);
+      nodeEls[ci + ":" + key] = node;
+    });
+
+    board.appendChild(column);
+  });
+
+  renderBreadcrumb();
+  drawConnectors();
+}
+
+// 인접 컬럼 사이를 "왼쪽이 오른쪽을 호출"하는 방향의 곡선으로 연결
+function drawConnectors() {
+  const board = document.getElementById("board");
+  const svg = document.getElementById("connectors");
+  svg.setAttribute("width", board.scrollWidth);
+  svg.setAttribute("height", board.scrollHeight);
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+  const boardRect = board.getBoundingClientRect();
+  const rel = el => {
+    const r = el.getBoundingClientRect();
+    return {
+      left:  r.left  - boardRect.left + board.scrollLeft,
+      right: r.right - boardRect.left + board.scrollLeft,
+      midY:  r.top   - boardRect.top  + board.scrollTop + r.height / 2,
+    };
+  };
+  const drawEdge = (leftKey, leftCi, rightKey, rightCi, active) => {
+    const lEl = nodeEls[leftCi + ":" + leftKey];
+    const rEl = nodeEls[rightCi + ":" + rightKey];
+    if (!lEl || !rEl) return;
+    const l = rel(lEl), r = rel(rEl);
+    const x1 = l.right, y1 = l.midY, x2 = r.left, y2 = r.midY;
+    const dx = (x2 - x1) * 0.5;
+    const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    p.setAttribute("d", `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`);
+    p.setAttribute("class", "edge" + (active ? " active" : ""));
+    svg.appendChild(p);
+  };
+
+  for (let ci = 0; ci < displayColumns.length - 1; ci++) {
+    const L = displayColumns[ci], R = displayColumns[ci + 1];
+    if (ci + 1 <= baseColIndex) {
+      // 왼쪽(caller) 구간: 왼쪽 모든 노드 → 오른쪽의 선택 노드
+      const target = R.selected;
+      if (!target) continue;
+      L.items.forEach(k => {
+        if (calleesOf(k).includes(target))
+          drawEdge(k, ci, target, ci + 1, k === L.selected);
+      });
+    } else {
+      // 오른쪽(callee) 구간: 왼쪽의 선택 노드 → 오른쪽 모든 노드
+      const source = L.selected;
+      if (!source) continue;
+      R.items.forEach(k => {
+        if (calleesOf(source).includes(k))
+          drawEdge(source, ci, k, ci + 1, k === R.selected);
+      });
+    }
+  }
+}
+
+window.addEventListener("resize", drawConnectors);
+
+function renderBreadcrumb() {
+  const bc = document.getElementById("breadcrumb");
+  bc.innerHTML = "";
+  // 왼쪽 caller(깊은→얕은) → BASE → 오른쪽 callee
+  const full = [...callerPath.slice(1).reverse(), BASE, ...calleePath.slice(1)];
+  full.forEach((key, i) => {
+    if (i > 0) {
+      const sep = document.createElement("span");
+      sep.className = "crumb-sep";
+      sep.textContent = "→";
+      bc.appendChild(sep);
+    }
+    const c = document.createElement("span");
+    c.className = "crumb" + (key === BASE ? " base" : "");
+    c.innerHTML = `<span class="cls">${graph[key].cls}.</span>${methodOf(key)}()`;
+    bc.appendChild(c);
+  });
+}
+
+// 플러그인 주입 데이터로 초기화
+if (BASE && graph[BASE]) {
+  document.getElementById("title").textContent = "🔀 " + BASE.split(".").pop() + "()";
+  render();
+} else {
+  document.getElementById("board").innerHTML =
+    '<div class="empty-hint">분석할 메소드를 에디터에서 선택한 뒤 우클릭 → Show Call Flow 를 실행하세요.</div>';
+}
+</script>
+</body>
+</html>
