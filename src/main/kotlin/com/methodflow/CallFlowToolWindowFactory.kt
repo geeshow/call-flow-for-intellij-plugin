@@ -26,24 +26,10 @@ class CallFlowToolWindowFactory : ToolWindowFactory {
         val component: JComponent = if (JBCefApp.isSupported()) {
             val browser = JBCefBrowser()
 
-            // 단일 fire-and-forget 브리지. 메시지 형태로 동작을 구분한다:
-            //   "expand:nodeId|dir" → 드릴다운(결과는 __applyExpand 로 push)
-            //   "caller=>callee"    → 실제 호출 위치로 이동
-            //   그 외(nodeId)       → 메소드 선언으로 이동
+            // 단일 fire-and-forget 브리지. "caller=>callee" 면 호출 위치, 아니면 선언으로 이동
             val query = JBCefJSQuery.create(browser as JBCefBrowserBase)
             query.addHandler { msg ->
-                when {
-                    msg.startsWith("expand:") -> {
-                        val json = service.expandNode(msg.removePrefix("expand:")) ?: "{}"
-                        // 드릴다운 결과를 웹뷰로 되밀어줌
-                        browser.cefBrowser.executeJavaScript(
-                            "if(window.__applyExpand)window.__applyExpand($json);",
-                            browser.cefBrowser.url, 0
-                        )
-                    }
-                    msg.contains("=>") -> service.navigateToCall(msg)
-                    else -> service.navigateTo(msg)
-                }
+                if (msg.contains("=>")) service.navigateToCall(msg) else service.navigateTo(msg)
                 null
             }
 
@@ -54,8 +40,7 @@ class CallFlowToolWindowFactory : ToolWindowFactory {
                     cef.executeJavaScript(
                         "window.__send = function(__m){ $send };" +
                             "window.__navigate = function(id){ window.__send(id); };" +
-                            "window.__navigateCall = function(a,b){ window.__send(a + '=>' + b); };" +
-                            "window.__expand = function(nodeId, dir){ window.__send('expand:' + nodeId + '|' + dir); };",
+                            "window.__navigateCall = function(a,b){ window.__send(a + '=>' + b); };",
                         cef.url, 0
                     )
                 }

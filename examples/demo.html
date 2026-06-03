@@ -232,9 +232,6 @@
   }
   .node.selected .chevron { color: var(--accent); }
   .node.leaf .chevron { visibility: hidden; }
-  /* frontier: 아직 분석 안 된 방향 — 클릭하면 한 단계 더 펼침 */
-  .node.frontier { border-style: dashed; }
-  .node.frontier .call-count { color: var(--accent); }
 
   .empty-hint {
     color: var(--muted);
@@ -259,7 +256,7 @@
 <body>
   <header>
     <h1 id="title">🔀 Call Flow</h1>
-    <span class="sub">[standalone 데모: 실제 소스 이동·드릴다운은 IntelliJ 플러그인에서만 동작] · 노드 클릭 = 메소드 선언으로 · 노드 오른쪽 <b>↳</b> 버튼 = 실제 호출 코드 줄로 이동</span>
+    <span class="sub">[standalone 데모: 실제 소스 이동은 IntelliJ 플러그인에서만 동작] · 노드 클릭 = 메소드 선언으로 · 노드 오른쪽 <b>↳</b> 버튼 = 실제 호출 코드 줄로 이동</span>
   </header>
 
   <div class="breadcrumb" id="breadcrumb"></div>
@@ -276,7 +273,7 @@
 
 <script>
 // ----- 실제 분석 데이터: MemberBankService.getTransactions (Kotlin) -----
-let graph = {"OrderController.createOrder":{"cls":"OrderController","type":"api","calls":["OrderService.placeOrder"],"cx":true,"rx":true},"BatchImporter.importOrders":{"cls":"BatchImporter","type":"svc","calls":["OrderService.placeOrder"],"cx":true,"rx":true},"OrderMessageConsumer.onMessage":{"cls":"OrderMessageConsumer","type":"api","calls":["OrderService.placeOrder"],"cx":true,"rx":true},"OrderService.placeOrder":{"cls":"OrderService","type":"svc","root":true,"calls":["OrderValidator.validate","PaymentService.pay","OrderRepository.save","EventPublisher.publish"],"cx":true,"rx":true},"OrderValidator.validate":{"cls":"OrderValidator","type":"util","calls":["RuleRepository.findRules"],"cx":true,"rx":true},"RuleRepository.findRules":{"cls":"RuleRepository","type":"repo","calls":[],"cx":true,"rx":true},"PaymentService.pay":{"cls":"PaymentService","type":"svc","calls":["PaymentGatewayClient.charge"],"cx":true,"rx":true},"PaymentGatewayClient.charge":{"cls":"PaymentGatewayClient","type":"api","calls":[],"cx":true,"rx":true},"OrderRepository.save":{"cls":"OrderRepository","type":"repo","calls":[],"cx":true,"rx":true},"EventPublisher.publish":{"cls":"EventPublisher","type":"api","calls":[],"cx":true,"rx":true}};
+let graph = {"OrderController.createOrder":{"cls":"OrderController","type":"api","calls":["OrderService.placeOrder"]},"BatchImporter.importOrders":{"cls":"BatchImporter","type":"svc","calls":["OrderService.placeOrder"]},"OrderMessageConsumer.onMessage":{"cls":"OrderMessageConsumer","type":"api","calls":["OrderService.placeOrder"]},"OrderService.placeOrder":{"cls":"OrderService","type":"svc","root":true,"calls":["OrderValidator.validate","PaymentService.pay","OrderRepository.save","EventPublisher.publish"]},"OrderValidator.validate":{"cls":"OrderValidator","type":"util","calls":["RuleRepository.findRules"]},"RuleRepository.findRules":{"cls":"RuleRepository","type":"repo","calls":[]},"PaymentService.pay":{"cls":"PaymentService","type":"svc","calls":["PaymentGatewayClient.charge"]},"PaymentGatewayClient.charge":{"cls":"PaymentGatewayClient","type":"api","calls":[]},"OrderRepository.save":{"cls":"OrderRepository","type":"repo","calls":[]},"EventPublisher.publish":{"cls":"EventPublisher","type":"api","calls":[]}};
 
 let BASE = "OrderService.placeOrder";   // 플러그인이 주입
 const typeLabel = { svc: "SVC", repo: "REPO", util: "UTIL", api: "API" };
@@ -294,30 +291,6 @@ function buildCallersIndex() {
 buildCallersIndex();
 function callersOf(k) { return callersIndex[k] || []; }
 function calleesOf(k) { return (graph[k] && graph[k].calls) || []; }
-
-// 무한 드릴다운: 플러그인이 보낸 fragment(객체)를 그래프에 병합
-function mergeFragment(frag) {
-  if (!frag || typeof frag !== "object") return false;
-  for (const k in frag) {
-    const f = frag[k];
-    if (!graph[k]) {
-      graph[k] = f;
-      graph[k].calls = (f.calls || []).slice();
-    } else {
-      const g = graph[k];
-      (f.calls || []).forEach(c => { if (!g.calls.includes(c)) g.calls.push(c); });
-      if (f.cx) g.cx = true;     // 분석 완료 플래그는 OR 병합 (다운그레이드 금지)
-      if (f.rx) g.rx = true;
-    }
-  }
-  buildCallersIndex();
-  return true;
-}
-
-// 플러그인(Kotlin)이 드릴다운 결과를 이 함수로 push 한다.
-window.__applyExpand = function(frag) {
-  if (mergeFragment(frag)) render();
-};
 
 // 선택 경로 (둘 다 BASE에서 시작)
 let calleePath = [BASE];   // 오른쪽: 이 메소드가 호출하는 흐름
@@ -380,21 +353,16 @@ function render() {
       const data = graph[key];
       const isSelected = colDesc.selected === key;
       const isBase = colDesc.side === "base";
-      // 이 방향(callee/caller)이 이미 분석됐는가. 미분석 noeds = frontier(더 펼칠 수 있음)
-      const dirExpanded = colDesc.side === "caller" ? !!data.rx
-                        : colDesc.side === "base"   ? true
-                        : !!data.cx;
       const outCount = colDesc.side === "caller" ? callersOf(key).length : calleesOf(key).length;
-      const isLeaf = dirExpanded && outCount === 0;   // 분석했는데 가지가 없으면 진짜 leaf
+      const isLeaf = outCount === 0;
 
       const node = document.createElement("div");
       node.className = "node" + (isSelected ? " selected" : "") +
-                       (isBase ? " root" : "") + (isLeaf ? " leaf" : "") +
-                       (!dirExpanded && !isBase ? " frontier" : "");
+                       (isBase ? " root" : "") + (isLeaf ? " leaf" : "");
 
       const countLabel = colDesc.side === "caller"
-        ? (!dirExpanded ? "⋯ 더보기" : (outCount === 0 ? "entry" : outCount + " ↤"))
-        : (!dirExpanded ? "⋯ 더보기" : (outCount === 0 ? "leaf"  : "→ " + outCount));
+        ? (isLeaf ? "entry" : outCount + " ↤")
+        : (isLeaf ? "leaf"  : "→ " + outCount);
       const chev = colDesc.side === "caller" ? "‹" : "›";
 
       // 이 노드의 호출선(edge): caller=>callee. 호출 위치(call-site) 이동에 사용.
@@ -427,28 +395,16 @@ function render() {
         if (window.__navigate) { try { window.__navigate(key); } catch (e) {} }
         if (colDesc.side === "base") {
           calleePath = [BASE]; callerPath = [BASE];
-          render();
-          return;
-        }
-        let dir;
-        if (colDesc.side === "callee") {
+        } else if (colDesc.side === "callee") {
           const level = ci - baseColIndex;            // base=0
           calleePath = calleePath.slice(0, level);
           calleePath.push(key);
-          dir = "callee";
         } else { // caller
           const level = baseColIndex - ci;            // base=0
           callerPath = callerPath.slice(0, level);
           callerPath.push(key);
-          dir = "caller";
         }
-        // 아직 이 방향이 분석되지 않았으면 플러그인에 한 단계 더 요청해서 이어붙임.
-        // 결과는 Kotlin 이 window.__applyExpand 로 push → 거기서 재렌더.
-        const needData = dir === "callee" ? !graph[key].cx : !graph[key].rx;
-        render();   // 선택 상태 즉시 반영
-        if (needData && window.__expand) {
-          try { window.__expand(key, dir); } catch (e) {}
-        }
+        render();
       });
 
       // 오른쪽 버튼: 실제 호출 위치(call-site)로 이동 (펼치기 없음)

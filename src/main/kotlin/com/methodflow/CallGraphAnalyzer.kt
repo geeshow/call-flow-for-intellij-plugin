@@ -32,8 +32,6 @@ object CallGraphAnalyzer {
 
     class Node(val id: String, val cls: String, val type: String) {
         val calls = LinkedHashSet<String>()   // "A.b" 형태의 callee id 목록 (A 가 b 를 호출)
-        var cExpanded = false                 // callee 방향을 이미 분석했는가 (false=frontier)
-        var rExpanded = false                 // caller 방향을 이미 분석했는가 (false=frontier)
     }
 
     /** 노드 클릭 시 점프할 소스 위치. */
@@ -73,7 +71,6 @@ object CallGraphAnalyzer {
         if (depth >= MAX_DEPTH) return
         val parent = nodeFor(el, ctx) ?: return
         if (!seen.add(parent.id)) return
-        parent.cExpanded = true   // 이 노드의 callee 를 실제로 탐색함
 
         calleesOf(el).take(MAX_CHILDREN).forEach { (site, target) ->
             val child = nodeFor(target, ctx) ?: return@forEach
@@ -88,7 +85,6 @@ object CallGraphAnalyzer {
         if (depth >= MAX_DEPTH) return
         val target = nodeFor(el, ctx) ?: return
         if (!seen.add(target.id)) return
-        target.rExpanded = true   // 이 노드의 caller 를 실제로 탐색함
 
         val scope = GlobalSearchScope.projectScope(project)
         // 호출자별 첫 호출 위치(call-site) 보존
@@ -105,41 +101,6 @@ object CallGraphAnalyzer {
             recordEdge(cn.id, target.id, site, ctx)       // 호출 위치: caller 본문 내 site
             expandCallers(project, caller, ctx, depth + 1, seen)
         }
-    }
-
-    /**
-     * 한 노드에서 한 방향(callee/caller)으로 **한 단계만** 더 분석한다. (무한 드릴다운용)
-     * 반환된 fragment 를 기존 그래프에 병합한다.
-     */
-    fun expandFrom(project: Project, element: PsiElement, direction: String): Result = runReadAction {
-        val ctx = Ctx()
-        val id = idOf(element) ?: return@runReadAction Result("", "{}", emptyMap(), emptyMap())
-        val node = nodeFor(element, ctx) ?: return@runReadAction Result("", "{}", emptyMap(), emptyMap())
-
-        if (direction == "caller") {
-            node.rExpanded = true
-            val scope = GlobalSearchScope.projectScope(project)
-            val callerSites = LinkedHashMap<PsiElement, PsiElement>()
-            ReferencesSearch.search(element, scope).findAll().forEach { ref ->
-                val caller = enclosingCallable(ref.element) ?: return@forEach
-                callerSites.putIfAbsent(caller, ref.element)
-            }
-            callerSites.entries.take(MAX_CHILDREN).forEach { (caller, site) ->
-                val cn = nodeFor(caller, ctx) ?: return@forEach
-                if (cn.id == node.id) return@forEach
-                cn.calls.add(node.id)
-                recordEdge(cn.id, node.id, site, ctx)
-            }
-        } else { // callee
-            node.cExpanded = true
-            calleesOf(element).take(MAX_CHILDREN).forEach { (site, target) ->
-                val child = nodeFor(target, ctx) ?: return@forEach
-                if (child.id == node.id) return@forEach
-                node.calls.add(child.id)
-                recordEdge(node.id, child.id, site, ctx)
-            }
-        }
-        Result(id, toJson(ctx.nodes, ""), ctx.locations, ctx.edges)
     }
 
     private fun recordEdge(callerId: String, calleeId: String, site: PsiElement, ctx: Ctx) {
@@ -238,8 +199,6 @@ object CallGraphAnalyzer {
             sb.append("\"cls\":\"").append(esc(n.cls)).append("\",")
             sb.append("\"type\":\"").append(n.type).append('"')
             if (n.id == baseId) sb.append(",\"root\":true")
-            if (n.cExpanded) sb.append(",\"cx\":true")   // callee 분석 완료
-            if (n.rExpanded) sb.append(",\"rx\":true")   // caller 분석 완료
             sb.append(",\"calls\":[")
             var f2 = true
             for (c in n.calls) {

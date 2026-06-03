@@ -1,14 +1,11 @@
 package com.methodflow
 
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindowManager
-import com.intellij.psi.PsiElement
-import com.intellij.psi.PsiManager
 import com.intellij.ui.jcef.JBCefBrowser
 
 /**
@@ -71,32 +68,6 @@ class CallFlowPanelService(private val project: Project) {
             if (project.isDisposed || !loc.file.isValid) return@invokeLater
             OpenFileDescriptor(project, loc.file, loc.offset).navigate(true)
         }
-    }
-
-    /**
-     * 무한 드릴다운: nodeId 를 PSI 로 되찾아 한 방향(callee/caller)으로 한 단계 더 분석한 뒤,
-     * 위치 맵을 누적 병합하고 그래프 fragment(JSON)를 반환한다. req = "nodeId|direction"
-     */
-    fun expandNode(req: String): String? {
-        val sep = req.lastIndexOf('|')
-        if (sep < 0) return null
-        val nodeId = req.substring(0, sep)
-        val direction = req.substring(sep + 1)
-
-        val element = runReadAction { resolveElement(nodeId) } ?: return null
-        val result = CallGraphAnalyzer.expandFrom(project, element, direction)
-        locations.putAll(result.locations)
-        edgeLocations.putAll(result.edgeLocations)
-        return result.graphJson
-    }
-
-    /** 저장된 선언 위치로 해당 메소드 PSI 요소를 다시 찾는다. (read action 내에서 호출) */
-    private fun resolveElement(nodeId: String): PsiElement? {
-        val loc = locations[nodeId] ?: return null
-        if (!loc.file.isValid) return null
-        val psiFile = PsiManager.getInstance(project).findFile(loc.file) ?: return null
-        val at = psiFile.findElementAt(loc.offset) ?: return null
-        return CallGraphAnalyzer.enclosingCallable(at)
     }
 
     private fun flush() {
