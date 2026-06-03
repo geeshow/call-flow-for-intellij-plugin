@@ -26,21 +26,35 @@ class CallFlowToolWindowFactory : ToolWindowFactory {
         val component: JComponent = if (JBCefApp.isSupported()) {
             val browser = JBCefBrowser()
 
-            // JS → Kotlin 브리지: 메시지가 "caller=>callee" 면 호출 위치, 아니면 선언으로 점프
-            val query = JBCefJSQuery.create(browser as JBCefBrowserBase)
-            query.addHandler { msg ->
+            // 브리지 1: 소스 이동 (fire-and-forget). "caller=>callee" 면 호출 위치, 아니면 선언으로
+            val navQuery = JBCefJSQuery.create(browser as JBCefBrowserBase)
+            navQuery.addHandler { msg ->
                 if (msg.contains("=>")) service.navigateToCall(msg) else service.navigateTo(msg)
                 null
+            }
+
+            // 브리지 2: 무한 드릴다운 (요청-응답). req="nodeId|direction" → 그래프 fragment JSON 반환
+            val expandQuery = JBCefJSQuery.create(browser as JBCefBrowserBase)
+            expandQuery.addHandler { req ->
+                JBCefJSQuery.Response(service.expandNode(req) ?: "")
             }
 
             // HTML 은 분석마다 새로 loadHTML 되므로, 매 로드 후 브리지 함수를 재정의
             browser.jbCefClient.addLoadHandler(object : CefLoadHandlerAdapter() {
                 override fun onLoadEnd(cef: CefBrowser, frame: CefFrame, httpStatusCode: Int) {
-                    val send = query.inject("__m")
+                    val send = navQuery.inject("__m")
+                    val expandInject = expandQuery.inject(
+                        "__req",
+                        "if(window.__expandResolve)window.__expandResolve(response)",
+                        "if(window.__expandResolve)window.__expandResolve(null)"
+                    )
                     cef.executeJavaScript(
                         "window.__send = function(__m){ $send };" +
                             "window.__navigate = function(id){ window.__send(id); };" +
-                            "window.__navigateCall = function(a,b){ window.__send(a + '=>' + b); };",
+                            "window.__navigateCall = function(a,b){ window.__send(a + '=>' + b); };" +
+                            "window.__expand = function(req, cb){" +
+                            "  window.__expandResolve = function(r){ window.__expandResolve = null; if(cb) cb(r); };" +
+                            "  var __req = req; $expandInject };",
                         cef.url, 0
                     )
                 }

@@ -1,11 +1,14 @@
 package com.methodflow
 
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindowManager
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiManager
 import com.intellij.ui.jcef.JBCefBrowser
 
 /**
@@ -23,11 +26,9 @@ class CallFlowPanelService(private val project: Project) {
     @Volatile
     private var pending: Pair<String, String>? = null   // baseId, graphJson
 
-    // 노드 id -> 선언 위치 / "callerId=>calleeId" -> 호출(call-site) 위치
-    @Volatile
-    private var locations: Map<String, CallGraphAnalyzer.Loc> = emptyMap()
-    @Volatile
-    private var edgeLocations: Map<String, CallGraphAnalyzer.Loc> = emptyMap()
+    // 노드 id -> 선언 위치 / "callerId=>calleeId" -> 호출(call-site) 위치 (드릴다운으로 누적되므로 mutable)
+    private val locations = java.util.concurrent.ConcurrentHashMap<String, CallGraphAnalyzer.Loc>()
+    private val edgeLocations = java.util.concurrent.ConcurrentHashMap<String, CallGraphAnalyzer.Loc>()
 
     /** 액션에서 호출: 데이터 저장 후 툴윈도우를 띄우고 flush. */
     fun show(
@@ -37,8 +38,9 @@ class CallFlowPanelService(private val project: Project) {
         edgeLocations: Map<String, CallGraphAnalyzer.Loc>
     ) {
         pending = baseId to graphJson
-        this.locations = locations
-        this.edgeLocations = edgeLocations
+        // 새 분석마다 위치 맵 초기화 후 재구성
+        this.locations.clear(); this.locations.putAll(locations)
+        this.edgeLocations.clear(); this.edgeLocations.putAll(edgeLocations)
         val tw = ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID)
         if (tw != null) {
             tw.activate({ flush() }, true)
@@ -69,6 +71,32 @@ class CallFlowPanelService(private val project: Project) {
             if (project.isDisposed || !loc.file.isValid) return@invokeLater
             OpenFileDescriptor(project, loc.file, loc.offset).navigate(true)
         }
+    }
+
+    /**
+     * 무한 드릴다운: nodeId 를 PSI 로 되찾아 한 방향(callee/caller)으로 한 단계 더 분석한 뒤,
+     * 위치 맵을 누적 병합하고 그래프 fragment(JSON)를 반환한다. req = "nodeId|direction"
+     */
+    fun expandNode(req: String): String? {
+        val sep = req.lastIndexOf('|')
+        if (sep < 0) return null
+        val nodeId = req.substring(0, sep)
+        val direction = req.substring(sep + 1)
+
+        val element = runReadAction { resolveElement(nodeId) } ?: return null
+        val result = CallGraphAnalyzer.expandFrom(project, element, direction)
+        locations.putAll(result.locations)
+        edgeLocations.putAll(result.edgeLocations)
+        return result.graphJson
+    }
+
+    /** 저장된 선언 위치로 해당 메소드 PSI 요소를 다시 찾는다. (read action 내에서 호출) */
+    private fun resolveElement(nodeId: String): PsiElement? {
+        val loc = locations[nodeId] ?: return null
+        if (!loc.file.isValid) return null
+        val psiFile = PsiManager.getInstance(project).findFile(loc.file) ?: return null
+        val at = psiFile.findElementAt(loc.offset) ?: return null
+        return CallGraphAnalyzer.enclosingCallable(at)
     }
 
     private fun flush() {
