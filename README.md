@@ -1,25 +1,42 @@
 # Call Flow for IntelliJ
 
-선택한 메소드를 기준으로 **호출(callee)** 과 **피호출(caller)** 관계를 양방향 그래프로 시각화하는 IntelliJ 플러그인입니다. **Kotlin / Java** 를 지원합니다.
+선택한 메소드를 기준으로 **호출(callee)** 과 **피호출(caller)** 관계를 한눈에 보여주는 IntelliJ 플러그인입니다. **Kotlin / Java** 를 지원합니다.
 
-- 기준 메소드를 **중심**에 두고, 왼쪽으로 **누가 이 메소드를 호출하는지(caller)**, 오른쪽으로 **이 메소드가 무엇을 호출하는지(callee)** 를 컬럼 + 곡선으로 펼칩니다.
-- 노드를 클릭하면 컬럼이 한 단계 더 펼쳐지고, 동시에 해당 메소드 **선언부**로 에디터가 이동합니다.
-- 노드 오른쪽(또는 호출선 쪽)의 **↳ 버튼**을 누르면 그 호출이 일어나는 **실제 코드 줄(call-site)** 로 이동합니다.
+![Call Flow 화면](docs/screenshot.png)
+
+## 한눈에 이해하기
+
+위 화면은 `OrderService.placeOrder()` 를 기준으로 분석한 모습입니다. **기준 메소드를 가운데** 두고 좌우로 호출 관계가 펼쳐집니다.
+
+```
+   ← 피호출(caller)              ● 기준 메소드 →               호출(callee) →
+  누가 이 메소드를 부르는가          분석 대상              이 메소드가 무엇을 부르는가
+```
+
+| 화면 요소 | 의미 |
+|-----------|------|
+| **가운데 보라색 노드** | 분석 기준 메소드 (`placeOrder`) |
+| **왼쪽 컬럼들** | 이 메소드를 **호출하는** 쪽 (caller) — `createOrder`, `importOrders`, `onMessage` 등 진입점 |
+| **오른쪽 컬럼들** | 이 메소드가 **호출하는** 쪽 (callee) — `validate`, `pay`, `save`, `publish` |
+| **곡선** | 호출 관계. 파란 선은 현재 선택된 경로 |
+| **상단 경로(breadcrumb)** | 펼친 호출 흐름: `onMessage() → placeOrder() → pay() → charge()` |
+| **노드 색상 뱃지** | `API`(Controller/Client) · `SVC`(Service) · `REPO`(Repository) · `UTIL` |
+| **노드 안쪽 ↳ 버튼** | 그 호출이 일어나는 **실제 코드 줄**로 이동 (아래 참고) |
+
+### 노드 하나의 두 영역
+
+각 노드는 좌/우로 나뉘어 클릭 동작이 다릅니다.
+
+```
+┌─────────────────────────┬──────┐
+│  [SVC] pay()            │      │   ← 왼쪽(넓은 영역): 메소드 선언으로 이동
+│  PaymentService    → 1  │  ↳   │      + 그 방향으로 한 단계 더 펼치기
+└─────────────────────────┴──────┘   ← ↳ 버튼: 실제 호출 코드 줄(call-site)로 이동
+```
 
 > UI 는 IDE 내장 브라우저(JCEF)에 HTML/CSS/JS 로 렌더링되며, 호출 관계는 PSI 로 분석해 주입합니다.
-
-## 데모
-
-`examples/demo.html` 를 브라우저로 열면 플러그인과 동일한 UI 를 샘플 데이터로 볼 수 있습니다
-(standalone 데모이므로 실제 소스 이동은 IntelliJ 플러그인에서만 동작합니다).
-
-```
-   피호출(caller) ↤              ● 기준              → 호출(callee)
- OrderController.createOrder ┐                    ┌ OrderValidator.validate
- BatchImporter.importOrders  ┼─ OrderService ─────┼ PaymentService.pay
- OrderMessageConsumer.onMsg  ┘  .placeOrder       ├ OrderRepository.save
-                                                  └ EventPublisher.publish
-```
+> 직접 둘러보려면 `examples/demo.html` 을 브라우저로 열어보세요
+> (standalone 데모이므로 실제 소스 이동은 플러그인에서만 동작합니다).
 
 ## 사용법
 
