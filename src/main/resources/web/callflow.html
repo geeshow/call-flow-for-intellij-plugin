@@ -251,6 +251,18 @@
   }
   .legend span { display: inline-flex; align-items: center; gap: 6px; }
   .dot { width: 9px; height: 9px; border-radius: 3px; }
+  .legend .filter-hint { color: var(--muted); opacity: 0.7; margin-left: auto; }
+  /* 클릭으로 표시/숨김 토글되는 타입 */
+  .legend .toggle {
+    cursor: pointer;
+    user-select: none;
+    padding: 3px 8px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    transition: background 0.16s, opacity 0.16s, border-color 0.16s;
+  }
+  .legend .toggle:hover { background: var(--panel-2); border-color: var(--border); }
+  .legend .toggle.off { opacity: 0.4; text-decoration: line-through; }
 </style>
 </head>
 <body>
@@ -263,12 +275,13 @@
 
   <div class="board" id="board"></div>
 
-  <div class="legend">
+  <div class="legend" id="legend">
     <span><span class="dot" style="background:#a78bfa"></span> 기준 메소드</span>
-    <span><span class="dot" style="background:#4ade80"></span> Service</span>
-    <span><span class="dot" style="background:#fbbf24"></span> Repository</span>
-    <span><span class="dot" style="background:#a78bfa"></span> Util</span>
-    <span><span class="dot" style="background:#4f8cff"></span> API / Client</span>
+    <span class="toggle" data-type="svc"><span class="dot" style="background:#4ade80"></span> Service</span>
+    <span class="toggle" data-type="repo"><span class="dot" style="background:#fbbf24"></span> Repository</span>
+    <span class="toggle" data-type="util"><span class="dot" style="background:#a78bfa"></span> Util</span>
+    <span class="toggle" data-type="api"><span class="dot" style="background:#4f8cff"></span> API / Client</span>
+    <span class="filter-hint">타입을 클릭해 표시/숨김</span>
   </div>
 
 <script>
@@ -279,6 +292,15 @@ let BASE = /*__BASE__*/"";   // 플러그인이 주입
 const typeLabel = { svc: "SVC", repo: "REPO", util: "UTIL", api: "API" };
 
 function methodOf(key) { return key.split(".").pop(); }
+
+// 타입 필터 (Util 은 기본 숨김). 기준 메소드는 항상 표시.
+const hiddenTypes = { util: true };
+function isHiddenKey(key) {
+  if (key === BASE) return false;
+  const t = graph[key] && graph[key].type;
+  return !!hiddenTypes[t];
+}
+function visibleItems(items) { return items.filter(k => !isHiddenKey(k)); }
 
 // 역방향 인덱스: 어떤 메소드를 호출하는 메소드들(callers). 그래프 병합 후 재구성됨.
 let callersIndex = {};
@@ -304,7 +326,7 @@ function buildColumns() {
   // 오른쪽(callee): col 0 = BASE, 이후 선택된 부모의 callees
   const calleeCols = [];
   for (let c = 0; c <= calleePath.length; c++) {
-    const items = c === 0 ? [BASE] : calleesOf(calleePath[c - 1]);
+    const items = visibleItems(c === 0 ? [BASE] : calleesOf(calleePath[c - 1]));
     if (items.length === 0) break;
     calleeCols.push({
       items, selected: calleePath[c] || null,
@@ -315,7 +337,7 @@ function buildColumns() {
   // 왼쪽(caller): 선택된 자식의 callers. 깊을수록 더 왼쪽 → 마지막에 reverse
   const callerCols = [];
   for (let d = 1; d <= callerPath.length; d++) {
-    const items = callersOf(callerPath[d - 1]);
+    const items = visibleItems(callersOf(callerPath[d - 1]));
     if (items.length === 0) break;
     callerCols.push({
       items, selected: callerPath[d] || null,
@@ -353,7 +375,9 @@ function render() {
       const data = graph[key];
       const isSelected = colDesc.selected === key;
       const isBase = colDesc.side === "base";
-      const outCount = colDesc.side === "caller" ? callersOf(key).length : calleesOf(key).length;
+      const outCount = colDesc.side === "caller"
+        ? visibleItems(callersOf(key)).length
+        : visibleItems(calleesOf(key)).length;
       const isLeaf = outCount === 0;
 
       const node = document.createElement("div");
@@ -481,6 +505,19 @@ function drawConnectors() {
 
 window.addEventListener("resize", drawConnectors);
 
+// 범례 타입 클릭 → 표시/숨김 토글
+function setupFilters() {
+  document.querySelectorAll("#legend .toggle").forEach(el => {
+    const type = el.getAttribute("data-type");
+    if (hiddenTypes[type]) el.classList.add("off");   // 초기 상태 반영 (Util off)
+    el.addEventListener("click", () => {
+      if (hiddenTypes[type]) delete hiddenTypes[type]; else hiddenTypes[type] = true;
+      el.classList.toggle("off", !!hiddenTypes[type]);
+      render();
+    });
+  });
+}
+
 function renderBreadcrumb() {
   const bc = document.getElementById("breadcrumb");
   bc.innerHTML = "";
@@ -501,6 +538,7 @@ function renderBreadcrumb() {
 }
 
 // 플러그인 주입 데이터로 초기화
+setupFilters();
 if (BASE && graph[BASE]) {
   document.getElementById("title").textContent = "🔀 " + BASE.split(".").pop() + "()";
   render();
